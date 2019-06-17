@@ -7,7 +7,7 @@ services:
 
 env:
   global:
-    - target_version=1.2.4
+    - target_version=0.8.0
   matrix:
     - target_arch=amd64
     - target_arch=armv7
