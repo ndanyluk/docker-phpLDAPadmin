@@ -1,0 +1,63 @@
+sudo: required
+
+language: generic
+
+services:
+  - docker
+
+env:
+  global:
+    - target_version=1.2.4
+  matrix:
+    - target_arch=amd64
+    - target_arch=armv7
+#    - target_arch=armv6 <------ NOT SUPPORTED BY DEBIAN STRETCH BASE IMAGE
+    - target_arch=arm64
+
+before_install:
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+  - sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+  - sudo apt-get update
+  - sudo apt-get -y install docker-ce
+  - mkdir $HOME/.docker
+  - 'echo "{" > $HOME/.docker/config.json'
+  - 'echo "  \"experimental\": \"enabled\"" >> $HOME/.docker/config.json'
+  - 'echo "}" >> $HOME/.docker/config.json'
+  - sudo service docker restart
+  - git clone https://github.com/sstephenson/bats.git
+  - cd bats
+  - sudo ./install.sh /usr/local
+  - cd ..
+
+install:
+  - docker run --rm --privileged multiarch/qemu-user-static:register
+  - make build ARCH=${target_arch}
+
+script:
+  - docker run -d --name test_image ndanyluk/phpldapadmin-${target_arch}:${target_version} sleep 10
+  - sleep 5
+  - sudo docker ps | grep -q test_image
+
+after_success:
+  - if [ -z "$DOCKER_USER" ]; then
+      echo "PR build, skipping Docker Hub push";
+    else
+      docker login -u "$DOCKER_USER" -p "$DOCKER_PASS";
+      make tag-latest push push-latest ARCH=${target_arch};
+    fi
+
+jobs:
+  include:
+    - stage: deploy
+      install: skip
+      script: skip
+      after_success:
+        - if [ -z "$DOCKER_USER" ]; then
+            echo "PR build, skipping Docker Hub push";
+          else
+            docker login -u "$DOCKER_USER" -p "$DOCKER_PASS";
+            docker manifest create ndanyluk/phpldapadmin:${target_version} ndanyluk/phpldapadmin-armv7:${target_version} ndanyluk/phpldapadmin-arm64:${target_version} ndanyluk/phpldapadmin-amd64:${target_version};
+            docker manifest create ndanyluk/phpldapadmin:latest ndanyluk/phpldapadmin-armv7:latest ndanyluk/phpldapadmin-amd64:latest ndanyluk/phpldapadmin-arm64:latest;
+            docker manifest push ndanyluk/phpldapadmin:${target_version};
+            docker manifest push ndanyluk/phpldapadmin:latest;
+          fi
